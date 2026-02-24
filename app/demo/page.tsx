@@ -1,5 +1,8 @@
+export const dynamic = "force-dynamic";
+
 'use client';
 
+import { Suspense } from 'react';
 import { ContactForm } from '@/components/forms/ContactForm';
 import { motion } from 'framer-motion';
 import { CheckCircle, Calendar, Video, Clock } from 'lucide-react';
@@ -60,7 +63,9 @@ export default function DemoPage() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
           >
-            <ContactForm type="demo" />
+            <Suspense fallback={null}>
+              <ContactForm type="demo" />
+            </Suspense>
           </motion.div>
 
           <motion.div
@@ -70,9 +75,7 @@ export default function DemoPage() {
             className="space-y-8"
           >
             <div>
-              <h2 className="text-3xl md:text-4xl font-bold mb-6">
-                Какво включва демото?
-              </h2>
+              <h2 className="text-3xl md:text-4xl font-bold mb-6">Какво включва демото?</h2>
               <ul className="space-y-4">
                 {benefits.map((benefit, index) => (
                   <li key={index} className="flex items-start">
@@ -84,11 +87,10 @@ export default function DemoPage() {
             </div>
 
             <Card className="p-8 bg-black text-white">
-              <h3 className="text-2xl font-bold mb-4">
-                14 дни безплатен пробен период
-              </h3>
+              <h3 className="text-2xl font-bold mb-4">14 дни безплатен пробен период</h3>
               <p className="text-gray-300 mb-6">
-                След демото, ако решите да продължите, получавате пълен достъп до всички функции за 14 дни. Няма нужда от кредитна карта.
+                След демото, ако решите да продължите, получавате пълен достъп до всички функции за 14 дни. Няма нужда
+                от кредитна карта.
               </p>
               <ul className="space-y-3">
                 <li className="flex items-center">
@@ -114,24 +116,19 @@ export default function DemoPage() {
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
         >
-          <h2 className="text-3xl md:text-4xl font-bold mb-16 text-center">
-            Как работи процесът?
-          </h2>
+          <h2 className="text-3xl md:text-4xl font-bold mb-16 text-center">Как работи процесът?</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {steps.map((step, index) => (
-              <Card key={index} className="p-8 text-center border border-gray-200 hover:shadow-lg transition-shadow">
+              <Card
+                key={index}
+                className="p-8 text-center border border-gray-200 hover:shadow-lg transition-shadow"
+              >
                 <div className="inline-flex items-center justify-center w-16 h-16 bg-black rounded-2xl mb-6">
                   <step.icon className="h-8 w-8 text-white" />
                 </div>
-                <div className="text-5xl font-bold text-[#111111] mb-4">
-                  0{index + 1}
-                </div>
-                <h3 className="text-xl font-bold mb-3">
-                  {step.title}
-                </h3>
-                <p className="text-gray-600 leading-relaxed">
-                  {step.description}
-                </p>
+                <div className="text-5xl font-bold text-[#111111] mb-4">0{index + 1}</div>
+                <h3 className="text-xl font-bold mb-3">{step.title}</h3>
+                <p className="text-gray-600 leading-relaxed">{step.description}</p>
               </Card>
             ))}
           </div>
