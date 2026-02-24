@@ -20,28 +20,33 @@ function mustGetEnv(name: string) {
   return v.trim();
 }
 
+// Взима base URL според текущия request (работи и за vercel.app и за custom domain)
+function getBaseUrl(req: NextRequest) {
+  const proto = req.headers.get("x-forwarded-proto") || "https";
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+  if (!host) throw new Error("Missing host");
+  return `${proto}://${host}`;
+}
+
 // state идва от query. Държим го само като относителен path, за да не може да редиректва към чужд домейн.
 function safePath(input: string | null, fallback = "/demo") {
   const s = (input || "").trim();
   if (!s) return fallback;
-  // позволяваме само относителни пътища започващи с /
   if (!s.startsWith("/")) return fallback;
-  // блокирай опити за //evil.com
   if (s.startsWith("//")) return fallback;
   return s;
 }
 
 export async function GET(request: NextRequest) {
-  const BASE_URL = "https://calldeskbg.com"; // 🔒 hard lock
+  const BASE_URL = getBaseUrl(request); // ✅ вместо hard lock
   try {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get("code");
     const error = searchParams.get("error");
 
-    // state ще е например "/demo?step=5" или "/onboarding?..."
+    // state ще е например "/demo?step=5"
     const stateRaw = searchParams.get("state");
     const statePath = safePath(stateRaw, "/demo?step=5");
-
     const redirectUrl = new URL(statePath, BASE_URL);
 
     if (error) {
@@ -56,13 +61,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(redirectUrl);
     }
 
-    // 🔒 Вземаме env. Ако липсва — ще хвърли ясно.
     const GOOGLE_CLIENT_ID = mustGetEnv("GOOGLE_CLIENT_ID");
     const GOOGLE_CLIENT_SECRET = mustGetEnv("GOOGLE_CLIENT_SECRET");
-    // Дори да имаш secret, пак го lock-ваме за да не изтече bolt/netlify
-    const GOOGLE_REDIRECT_URI =
-      process.env.GOOGLE_REDIRECT_URI?.trim() ||
-      "https://calldeskbg.com/api/google/callback";
+
+    // ✅ redirect_uri винаги е текущия домейн
+    const GOOGLE_REDIRECT_URI = `${BASE_URL}/api/google/callback`;
 
     // Exchange code -> tokens
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -94,9 +97,7 @@ export async function GET(request: NextRequest) {
     try {
       const calendarListResponse = await fetch(
         "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-        {
-          headers: { Authorization: `Bearer ${tokens.access_token}` },
-        }
+        { headers: { Authorization: `Bearer ${tokens.access_token}` } }
       );
 
       if (calendarListResponse.ok) {
@@ -107,7 +108,6 @@ export async function GET(request: NextRequest) {
         if (primaryCalendar?.id) calendarId = primaryCalendar.id;
       }
     } catch (err) {
-      // не блокирай flow-а ако това падне
       console.error("Error fetching calendar list:", err);
     }
 
@@ -120,7 +120,6 @@ export async function GET(request: NextRequest) {
       expiry_date: expiryDate,
     };
 
-    // success
     redirectUrl.searchParams.set("google", "ok");
 
     const response = NextResponse.redirect(redirectUrl);
@@ -135,11 +134,9 @@ export async function GET(request: NextRequest) {
 
     return response;
   } catch (err: any) {
-    // 🔥 показваме истинската причина
     const msg = encodeURIComponent(err?.message || "unknown");
     return NextResponse.redirect(
       new URL(`/demo?step=5&google=error&reason=${msg}`, BASE_URL)
     );
   }
 }
-
