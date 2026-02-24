@@ -38,7 +38,7 @@ function safePath(input: string | null, fallback = "/demo") {
 }
 
 export async function GET(request: NextRequest) {
-  const BASE_URL = getBaseUrl(request); // ✅ вместо hard lock
+  const BASE_URL = getBaseUrl(request);
   try {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get("code");
@@ -49,22 +49,25 @@ export async function GET(request: NextRequest) {
     const statePath = safePath(stateRaw, "/demo?step=5");
     const redirectUrl = new URL(statePath, BASE_URL);
 
+    // Ако Google върне error
     if (error) {
       redirectUrl.searchParams.set("google", "error");
       redirectUrl.searchParams.set("reason", "google_returned_error");
       return NextResponse.redirect(redirectUrl);
     }
 
+    // ✅ SELF-HEAL: ако някой е отворил callback директно (без code),
+    // вместо да връщаме no_code, стартираме OAuth правилно през /api/google/auth
     if (!code) {
-      redirectUrl.searchParams.set("google", "error");
-      redirectUrl.searchParams.set("reason", "no_code");
-      return NextResponse.redirect(redirectUrl);
+      const authUrl = new URL("/api/google/auth", BASE_URL);
+      authUrl.searchParams.set("state", statePath);
+      return NextResponse.redirect(authUrl);
     }
 
     const GOOGLE_CLIENT_ID = mustGetEnv("GOOGLE_CLIENT_ID");
     const GOOGLE_CLIENT_SECRET = mustGetEnv("GOOGLE_CLIENT_SECRET");
 
-    // ✅ redirect_uri винаги е текущия домейн
+    // redirect_uri винаги е текущия домейн
     const GOOGLE_REDIRECT_URI = `${BASE_URL}/api/google/callback`;
 
     // Exchange code -> tokens
@@ -120,6 +123,7 @@ export async function GET(request: NextRequest) {
       expiry_date: expiryDate,
     };
 
+    // success
     redirectUrl.searchParams.set("google", "ok");
 
     const response = NextResponse.redirect(redirectUrl);
