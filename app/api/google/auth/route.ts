@@ -6,13 +6,25 @@ function mustGetEnv(name: string) {
   return v.trim();
 }
 
-export async function GET(req: NextRequest) {
-  const BASE_URL = "https://calldeskbg.com"; // 🔒 lock
-  const redirectUri = "https://calldeskbg.com/api/google/callback"; // 🔒 lock
+function getBaseUrl(req: NextRequest) {
+  // 1) Prefer env (Production)
+  const envBase = process.env.APP_BASE_URL?.trim();
+  if (envBase) return envBase.replace(/\/$/, "");
 
+  // 2) Fallback to current request origin (Preview/Dev)
+  const proto = req.headers.get("x-forwarded-proto") || "https";
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+  if (!host) throw new Error("Missing host headers");
+  return `${proto}://${host}`.replace(/\/$/, "");
+}
+
+export async function GET(req: NextRequest) {
   try {
     const clientId = mustGetEnv("GOOGLE_CLIENT_ID");
     const clientSecret = mustGetEnv("GOOGLE_CLIENT_SECRET");
+
+    const BASE_URL = getBaseUrl(req);
+    const redirectUri = `${BASE_URL}/api/google/callback`;
 
     const url = new URL(req.url);
     const code = url.searchParams.get("code");
@@ -42,7 +54,6 @@ export async function GET(req: NextRequest) {
       const decoded = Buffer.from(state, "base64url").toString("utf8");
       tenantId = decoded.split(".")[0] || "demo";
     } catch {
-      // ако decode се счупи, пак продължаваме с demo
       tenantId = "demo";
     }
 
@@ -62,7 +73,6 @@ export async function GET(req: NextRequest) {
     const tokenJson: any = await tokenRes.json().catch(() => ({}));
 
     if (!tokenRes.ok) {
-      // Debug-friendly redirect (виж reason)
       const reason = tokenJson?.error || "token_exchange_failed";
       return NextResponse.redirect(
         `${BASE_URL}/demo?step=5&google=error&reason=${encodeURIComponent(reason)}`
@@ -79,29 +89,11 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 4) MVP calendarId (после ще го правим selectable)
+    // 4) MVP calendarId
     const calendarId = "primary";
     const expiresAt = expiresIn ? Date.now() + expiresIn * 1000 : null;
 
-    // 5) TODO: Save per-tenant (DB/Sheets)
-    // Ако искаш веднага към Apps Script:
-    // const appsUrl = process.env.APPS_SCRIPT_URL;
-    // if (appsUrl) {
-    //   await fetch(appsUrl, {
-    //     method: "POST",
-    //     headers: { "Content-Type": "application/json" },
-    //     body: JSON.stringify({
-    //       action: "saveGoogleTokens",
-    //       tenantId,
-    //       calendarId,
-    //       accessToken,
-    //       refreshToken: refreshToken || null,
-    //       expiresAt,
-    //     }),
-    //   });
-    // }
-
-    // 6) Success redirect + cleanup cookie
+    // 5) Success redirect + cleanup cookie
     const res = NextResponse.redirect(
       `${BASE_URL}/demo?step=5&google=success&tenantId=${encodeURIComponent(
         tenantId
@@ -116,7 +108,6 @@ export async function GET(req: NextRequest) {
 
     return res;
   } catch (e: any) {
-    // 🔥 вместо да пращаме "exception" без инфо — връщаме точната грешка като JSON
     return NextResponse.json(
       {
         ok: false,
@@ -126,6 +117,7 @@ export async function GET(req: NextRequest) {
           hasClientId: !!process.env.GOOGLE_CLIENT_ID,
           hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
           appsScriptUrl: process.env.APPS_SCRIPT_URL ? "set" : "missing",
+          appBaseUrl: process.env.APP_BASE_URL ? "set" : "missing",
         },
       },
       { status: 500 }
