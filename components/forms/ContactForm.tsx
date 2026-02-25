@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
-import { CheckCircle, Loader2, Clock } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 interface ContactFormProps {
   type?: 'contact' | 'demo' | 'pricing';
@@ -44,9 +44,7 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
     try {
       const response = await fetch('/api/lead', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
           uses_booking_software: formData.uses_booking_software === 'yes',
@@ -81,22 +79,18 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
 
   if (isSuccess) {
     return (
-      <Card className="p-8 text-center border border-green-500/50 bg-gradient-to-br from-green-500/20 to-green-600/10 shadow-xl shadow-green-500/20">
-        <CheckCircle className="h-20 w-20 text-green-400 mx-auto mb-6" />
-        <h3 className="text-3xl font-bold text-white mb-3">Благодарим ви!</h3>
-        <p className="text-gray-300 mb-2 text-lg">
-          Вашата заявка беше изпратена успешно.
-        </p>
-        <div className="inline-flex items-center space-x-2 text-gray-400 mb-6">
-          <Clock className="h-5 w-5" />
-          <p className="text-sm">
-            Ще се свържем с вас до 24 часа
-          </p>
-        </div>
-        <p className="text-sm text-gray-400 mb-6">
-          Проверете имейла си за потвърждение и следващи стъпки.
-        </p>
-        <Button onClick={() => setIsSuccess(false)} variant="outline" size="lg" className="border-2 border-gray-600 text-gray-300 hover:bg-white/5 hover:border-gray-400 hover:text-white">
+      <Card className="p-8 space-y-6">
+        <h3 className="text-2xl font-semibold">Благодарим ви!</h3>
+        <p>Вашата заявка беше изпратена успешно.</p>
+        <p>Ще се свържем с вас до 24 часа.</p>
+        <p>Проверете имейла си за потвърждение и следващи стъпки.</p>
+
+        <Button
+          onClick={() => setIsSuccess(false)}
+          variant="outline"
+          size="lg"
+          className="border-2 border-gray-600 text-gray-300 hover:bg-white/5 hover:border-gray-400 hover:text-white"
+        >
           Изпрати друга заявка
         </Button>
       </Card>
@@ -104,114 +98,46 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
   }
 
   return (
-    <Card className="p-8 shadow-xl shadow-blue-500/10 border border-gray-700 bg-gray-800/50 backdrop-blur-sm">
+    <Card className="p-8">
       <form onSubmit={handleSubmit} className="space-y-6">
-        <div>
-          <Label htmlFor="name" className="text-sm font-semibold text-gray-300">
-            Име и фамилия <span className="text-red-400">*</span>
-          </Label>
-          <Input
-            id="name"
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
-            required
-            placeholder="Иван Иванов"
-            className="mt-2"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-4">
           <div>
-            <Label htmlFor="email" className="text-sm font-semibold text-gray-300">
-              Имейл <span className="text-red-400">*</span>
-            </Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              value={formData.email}
-              onChange={handleChange}
-              required
-              placeholder="ivan@example.com"
-              className="mt-2"
-            />
+            <Label>Име и фамилия *</Label>
+            <Input name="name" value={formData.name} onChange={handleChange} required />
           </div>
 
           <div>
-            <Label htmlFor="phone" className="text-sm font-semibold text-gray-300">
-              Телефон <span className="text-red-400">*</span>
-            </Label>
-            <Input
-              id="phone"
-              name="phone"
-              type="tel"
-              value={formData.phone}
-              onChange={handleChange}
-              required
-              placeholder="+359 88 123 4567"
-              className="mt-2"
-            />
-          </div>
-        </div>
-
-        <div>
-          <Label htmlFor="salon_name" className="text-sm font-semibold text-gray-300">
-            Име на салон
-          </Label>
-          <Input
-            id="salon_name"
-            name="salon_name"
-            value={formData.salon_name}
-            onChange={handleChange}
-            placeholder="Салон Елеганс"
-            className="mt-2"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <Label htmlFor="city" className="text-sm font-semibold text-gray-300">
-              Град
-            </Label>
-            <Input
-              id="city"
-              name="city"
-              value={formData.city}
-              onChange={handleChange}
-              placeholder="София"
-              className="mt-2"
-            />
+            <Label>Имейл *</Label>
+            <Input name="email" value={formData.email} onChange={handleChange} required />
           </div>
 
           <div>
-            <Label htmlFor="locations_count" className="text-sm font-semibold text-gray-300">
-              Брой обекти
-            </Label>
-            <Input
-              id="locations_count"
-              name="locations_count"
-              type="number"
-              min="1"
-              value={formData.locations_count}
-              onChange={handleChange}
-              placeholder="1"
-              className="mt-2"
-            />
+            <Label>Телефон *</Label>
+            <Input name="phone" value={formData.phone} onChange={handleChange} required />
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <Label htmlFor="uses_booking_software" className="text-sm font-semibold text-gray-300">
-              Използвате ли софтуер за записване на часове?
-            </Label>
+            <Label>Име на салон</Label>
+            <Input name="salon_name" value={formData.salon_name} onChange={handleChange} />
+          </div>
+
+          <div>
+            <Label>Град</Label>
+            <Input name="city" value={formData.city} onChange={handleChange} />
+          </div>
+
+          <div>
+            <Label>Брой обекти</Label>
+            <Input name="locations_count" value={formData.locations_count} onChange={handleChange} />
+          </div>
+
+          <div>
+            <Label>Използвате ли софтуер за записване на часове?</Label>
             <select
-              id="uses_booking_software"
               name="uses_booking_software"
               value={formData.uses_booking_software}
               onChange={handleChange}
-              className="mt-2 w-full px-3 py-2 border border-gray-600 bg-gray-700 text-gray-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full p-2 rounded"
             >
               <option value="">Изберете...</option>
               <option value="yes">Да</option>
@@ -220,35 +146,22 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
           </div>
 
           <div>
-            <Label htmlFor="preferred_contact_method" className="text-sm font-semibold text-gray-300">
-              Предпочитан начин за контакт
-            </Label>
+            <Label>Предпочитан начин за контакт</Label>
             <select
-              id="preferred_contact_method"
               name="preferred_contact_method"
               value={formData.preferred_contact_method}
               onChange={handleChange}
-              className="mt-2 w-full px-3 py-2 border border-gray-600 bg-gray-700 text-gray-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full p-2 rounded"
             >
               <option value="phone">Телефон</option>
               <option value="email">Имейл</option>
             </select>
           </div>
-        </div>
 
-        <div>
-          <Label htmlFor="message" className="text-sm font-semibold text-gray-300">
-            Съобщение
-          </Label>
-          <Textarea
-            id="message"
-            name="message"
-            value={formData.message}
-            onChange={handleChange}
-            placeholder="Разкажете ни повече за вашия салон и нужди..."
-            rows={4}
-            className="mt-2"
-          />
+          <div>
+            <Label>Съобщение</Label>
+            <Textarea name="message" value={formData.message} onChange={handleChange} />
+          </div>
         </div>
 
         {error && (
@@ -257,12 +170,7 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
           </div>
         )}
 
-        <Button
-          type="submit"
-          size="lg"
-          className="w-full text-lg py-6 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 shadow-lg shadow-blue-500/50 hover:shadow-xl hover:shadow-blue-500/70 transition-all border-0"
-          disabled={isSubmitting}
-        >
+        <Button type="submit" size="lg" className="w-full text-lg py-6" disabled={isSubmitting}>
           {isSubmitting ? (
             <>
               <Loader2 className="mr-2 h-5 w-5 animate-spin" />
