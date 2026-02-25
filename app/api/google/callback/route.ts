@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function mustGetEnv(name: string) {
   const v = process.env[name];
@@ -8,53 +9,62 @@ function mustGetEnv(name: string) {
   return v.trim();
 }
 
-// allow only same-site relative paths
-function safeReturnTo(input: string | null, fallback = "/demo?step=5") {
+function safePath(input: string | null, fallback = "/demo?step=5") {
   const s = (input || "").trim();
   if (!s) return fallback;
-
-  // forbid absolute urls
-  if (s.startsWith("http://") || s.startsWith("https://")) return fallback;
-
-  // must start with /
   if (!s.startsWith("/")) return fallback;
-
-  // optional: block tricky stuff
-  if (s.includes("\n") || s.includes("\r")) return fallback;
-
+  if (s.startsWith("//")) return fallback;
+  if (s.includes("://")) return fallback;
   return s;
 }
 
-type TokenResponse = {
-  access_token: string;
-  refresh_token?: string;
-  expires_in: number;
-  token_type: string;
-};
+function appendParam(path: string, key: string, value: string) {
+  return path.includes("?") ? `${path}&${key}=${encodeURIComponent(value)}` : `${path}?${key}=${encodeURIComponent(value)}`;
+}
+
+async function fetchPrimaryCalendarId(accessToken: string): Promise<string> {
+  const r = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(`calendarList error: ${r.status} ${JSON.stringify(j)}`);
+
+  const items: any[] = Array.isArray(j.items) ? j.items : [];
+  const primary = items.find((x) => x && x.primary);
+  return (primary?.id || "primary") as string;
+}
 
 export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+
+  // 1) извадете state -> върнете към него (НЕ към /thanks)
+  const stateB64 = searchParams.get("state");
+  let returnTo = "/demo?step=5";
+
   try {
+    if (stateB64) {
+      const decoded = Buffer.from(stateB64, "base64url").toString("utf8");
+      const [rawPath] = decoded.split("||");
+      returnTo = safePath(rawPath, "/demo?step=5");
+    }
+
+    const error = searchParams.get("error");
+    if (error) {
+      console.error("GOOGLE CALLBACK ERROR:", error);
+      return NextResponse.redirect(appendParam(returnTo, "google", "error"));
+    }
+
+    const code = searchParams.get("code");
+    if (!code) {
+      console.error("GOOGLE CALLBACK: missing code");
+      return NextResponse.redirect(appendParam(returnTo, "google", "error"));
+    }
+
     const clientId = mustGetEnv("GOOGLE_CLIENT_ID");
     const clientSecret = mustGetEnv("GOOGLE_CLIENT_SECRET");
-    const redirectUri = mustGetEnv("GOOGLE_REDIRECT_URI"); // https://www.calldeskbg.com/api/google/callback
+    const redirectUri = mustGetEnv("GOOGLE_REDIRECT_URI");
 
-    const url = new URL(req.url);
-    const code = url.searchParams.get("code");
-    const state = url.searchParams.get("state"); // returnTo
-    const error = url.searchParams.get("error");
-
-    const returnTo = safeReturnTo(state, "/demo?step=5");
-
-    if (error) {
-      // ❌ important: go back to wizard, not /thanks
-      return NextResponse.redirect(new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=error`, url.origin));
-    }
-
-    if (!code) {
-      return NextResponse.redirect(new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=error`, url.origin));
-    }
-
-    // exchange code -> tokens
+    // 2) размяна code -> token
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -67,53 +77,41 @@ export async function GET(req: NextRequest) {
       }),
     });
 
-    const tokenText = await tokenRes.text();
+    const tokenJson: any = await tokenRes.json();
     if (!tokenRes.ok) {
-      // go back to wizard with error
-      return NextResponse.redirect(new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=error`, url.origin));
+      console.error("TOKEN EXCHANGE FAILED:", tokenRes.status, tokenJson);
+      return NextResponse.redirect(appendParam(returnTo, "google", "error"));
     }
 
-    const token: TokenResponse = JSON.parse(tokenText);
+    const access_token = tokenJson.access_token as string;
+    const refresh_token = tokenJson.refresh_token as string | undefined;
+    const expires_in = tokenJson.expires_in as number;
 
-    // get calendar list -> choose primary if exists
-    const calRes = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
-      headers: { Authorization: `Bearer ${token.access_token}` },
-    });
+    // 3) взимаме calendarId (primary)
+    const calendarId = await fetchPrimaryCalendarId(access_token);
 
-    const calText = await calRes.text();
-    if (!calRes.ok) {
-      return NextResponse.redirect(new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=error`, url.origin));
-    }
+    // 4) сетваме cookie
+    const expiry_date = Date.now() + (expires_in ?? 3600) * 1000;
 
-    const calJson = JSON.parse(calText);
-    const items: any[] = Array.isArray(calJson.items) ? calJson.items : [];
-    const primary = items.find((x) => x && x.primary) || items[0];
-    const calendarId = primary?.id || "primary";
-
-    const payload = {
+    const cookiePayload = {
       calendarId,
-      access_token: token.access_token,
-      refresh_token: token.refresh_token || null,
-      expiry_date: Date.now() + (token.expires_in * 1000),
+      access_token,
+      refresh_token,
+      expiry_date,
     };
 
-    // ✅ set cookie for /api/google/status to read
-    const res = NextResponse.redirect(
-      new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=ok`, url.origin)
-    );
-
-    res.cookies.set("gcal_oauth", encodeURIComponent(JSON.stringify(payload)), {
-      httpOnly: false, // needs to be readable by /api/google/status if you read client-side; ok for MVP
+    const res = NextResponse.redirect(appendParam(returnTo, "google", "ok"));
+    res.cookies.set("gcal_oauth", encodeURIComponent(JSON.stringify(cookiePayload)), {
+      httpOnly: true,
       secure: true,
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 30, // 30d
+      maxAge: 60 * 60 * 24 * 30, // 30 дни
     });
 
     return res;
-  } catch (e) {
-    const url = new URL(req.url);
-    // fallback back to wizard
-    return NextResponse.redirect(new URL(`/demo?step=5&google=error`, url.origin));
+  } catch (e: any) {
+    console.error("GOOGLE CALLBACK FATAL:", e?.message || e);
+    return NextResponse.redirect(appendParam(returnTo, "google", "error"));
   }
 }
