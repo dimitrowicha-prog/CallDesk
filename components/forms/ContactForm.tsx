@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -12,23 +12,13 @@ interface ContactFormProps {
   type?: 'contact' | 'demo' | 'pricing';
 }
 
-type FormState = {
-  name: string;
-  email: string;
-  phone: string;
-  salon_name: string;
-  city: string;
-  locations_count: string; // държим като string за input
-  uses_booking_software: '' | 'yes' | 'no';
-  preferred_contact_method: 'phone' | 'email';
-  message: string;
-};
-
 export function ContactForm({ type = 'contact' }: ContactFormProps) {
+  const router = useRouter();
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const [formData, setFormData] = useState<FormState>({
+  const [formData, setFormData] = useState({
     name: '',
     email: '',
     phone: '',
@@ -43,18 +33,15 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const { name, value } = e.target;
-    setFormData((p) => ({ ...p, [name]: value }));
+    setFormData((p) => ({ ...p, [e.target.name]: e.target.value }));
   };
 
-  function toIntSafe(v: string, fallback = 1) {
-    const n = Number(String(v || '').trim());
-    if (!Number.isFinite(n) || n <= 0) return fallback;
-    return Math.floor(n);
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    // ✅ DEBUG: ако това не излиза, значи submit изобщо не се случва
+    console.log('SUBMIT FIRED ✅');
+
     if (isSubmitting) return;
 
     setIsSubmitting(true);
@@ -62,26 +49,14 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
 
     try {
       const payload = {
-        name: formData.name.trim(),
-        email: formData.email.trim(),
-        phone: formData.phone.trim(),
-        salon_name: formData.salon_name.trim(),
-        city: formData.city.trim(),
-        locations_count: toIntSafe(formData.locations_count, 1),
-        // ако не е избрал нищо -> null (по-чисто за бекенда)
-        uses_booking_software:
-          formData.uses_booking_software === ''
-            ? null
-            : formData.uses_booking_software === 'yes',
-        preferred_contact_method: formData.preferred_contact_method,
-        message: formData.message.trim(),
+        ...formData,
+        locations_count: Number(formData.locations_count || 1),
+        uses_booking_software: formData.uses_booking_software === 'yes',
         type,
+        source: 'calldeskbg.com',
       };
 
-      // минимална валидация (UI required го прави, но това е backup)
-      if (!payload.name || !payload.email || !payload.phone) {
-        throw new Error('Моля, попълнете име, имейл и телефон.');
-      }
+      console.log('SENDING PAYLOAD ✅', payload);
 
       const response = await fetch('/api/lead', {
         method: 'POST',
@@ -89,21 +64,18 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
         body: JSON.stringify(payload),
       });
 
-      let data: any = null;
-      try {
-        data = await response.json();
-      } catch {
-        // ignore
-      }
+      const data = await response.json().catch(() => ({}));
+      console.log('API RESPONSE ✅', response.status, data);
 
       if (!response.ok) {
-        throw new Error(data?.error || 'Грешка при изпращане.');
+        throw new Error(data?.error || 'Нещо се обърка при изпращането');
       }
 
-      // ✅ УСПЕХ -> директно thank you страница
-      window.location.href = '/thanks';
+      // ✅ директно към thanks (без demo вътрешен success екран)
+      router.push('/thanks');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Грешка при изпращане');
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -153,7 +125,7 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
               name="uses_booking_software"
               value={formData.uses_booking_software}
               onChange={handleChange}
-              className="w-full p-2 rounded"
+              className="w-full p-2 rounded border border-gray-300"
             >
               <option value="">Изберете...</option>
               <option value="yes">Да</option>
@@ -167,7 +139,7 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
               name="preferred_contact_method"
               value={formData.preferred_contact_method}
               onChange={handleChange}
-              className="w-full p-2 rounded"
+              className="w-full p-2 rounded border border-gray-300"
             >
               <option value="phone">Телефон</option>
               <option value="email">Имейл</option>
@@ -186,7 +158,12 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
           </div>
         )}
 
-        <Button type="submit" size="lg" className="w-full text-lg py-6" disabled={isSubmitting}>
+        {/* ✅ ВАЖНО: native button за 100% submit */}
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full text-lg py-6 rounded-lg bg-black text-white hover:bg-black/90 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center"
+        >
           {isSubmitting ? (
             <>
               <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -195,7 +172,7 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
           ) : (
             'Изпрати заявка'
           )}
-        </Button>
+        </button>
 
         <p className="text-sm text-gray-500 text-center">
           Изпращайки формата, вие се съгласявате с нашите{' '}
