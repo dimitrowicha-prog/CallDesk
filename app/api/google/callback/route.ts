@@ -2,145 +2,118 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-interface TokenResponse {
-  access_token: string;
-  refresh_token?: string;
-  expires_in: number;
-  token_type: string;
-}
-
-interface CalendarListItem {
-  id: string;
-  primary?: boolean;
-}
-
 function mustGetEnv(name: string) {
   const v = process.env[name];
   if (!v || !v.trim()) throw new Error(`Missing env: ${name}`);
   return v.trim();
 }
 
-// Взима base URL според текущия request (работи и за vercel.app и за custom domain)
-function getBaseUrl(req: NextRequest) {
-  const proto = req.headers.get("x-forwarded-proto") || "https";
-  const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
-  if (!host) throw new Error("Missing host");
-  return `${proto}://${host}`;
-}
-
-// state идва от query. Държим го само като относителен path, за да не може да редиректва към чужд домейн.
-function safePath(input: string | null, fallback = "/demo") {
+// allow only same-site relative paths
+function safeReturnTo(input: string | null, fallback = "/demo?step=5") {
   const s = (input || "").trim();
   if (!s) return fallback;
+
+  // forbid absolute urls
+  if (s.startsWith("http://") || s.startsWith("https://")) return fallback;
+
+  // must start with /
   if (!s.startsWith("/")) return fallback;
-  if (s.startsWith("//")) return fallback;
+
+  // optional: block tricky stuff
+  if (s.includes("\n") || s.includes("\r")) return fallback;
+
   return s;
 }
 
-export async function GET(request: NextRequest) {
-  const BASE_URL = getBaseUrl(request);
+type TokenResponse = {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+  token_type: string;
+};
+
+export async function GET(req: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const code = searchParams.get("code");
-    const error = searchParams.get("error");
+    const clientId = mustGetEnv("GOOGLE_CLIENT_ID");
+    const clientSecret = mustGetEnv("GOOGLE_CLIENT_SECRET");
+    const redirectUri = mustGetEnv("GOOGLE_REDIRECT_URI"); // https://www.calldeskbg.com/api/google/callback
 
-    // state ще е например "/demo?step=5"
-    const stateRaw = searchParams.get("state");
-    const statePath = safePath(stateRaw, "/demo?step=5");
-    const redirectUrl = new URL(statePath, BASE_URL);
+    const url = new URL(req.url);
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state"); // returnTo
+    const error = url.searchParams.get("error");
 
-    // Ако Google върне error
+    const returnTo = safeReturnTo(state, "/demo?step=5");
+
     if (error) {
-      redirectUrl.searchParams.set("google", "error");
-      redirectUrl.searchParams.set("reason", "google_returned_error");
-      return NextResponse.redirect(redirectUrl);
+      // ❌ important: go back to wizard, not /thanks
+      return NextResponse.redirect(new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=error`, url.origin));
     }
 
-    // ✅ SELF-HEAL: ако някой е отворил callback директно (без code),
-    // вместо да връщаме no_code, стартираме OAuth правилно през /api/google/auth
     if (!code) {
-      const authUrl = new URL("/api/google/auth", BASE_URL);
-      authUrl.searchParams.set("state", statePath);
-      return NextResponse.redirect(authUrl);
+      return NextResponse.redirect(new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=error`, url.origin));
     }
 
-    const GOOGLE_CLIENT_ID = mustGetEnv("GOOGLE_CLIENT_ID");
-    const GOOGLE_CLIENT_SECRET = mustGetEnv("GOOGLE_CLIENT_SECRET");
-
-    // redirect_uri винаги е текущия домейн
-    const GOOGLE_REDIRECT_URI = `${BASE_URL}/api/google/callback`;
-
-    // Exchange code -> tokens
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    // exchange code -> tokens
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         code,
-        client_id: GOOGLE_CLIENT_ID,
-        client_secret: GOOGLE_CLIENT_SECRET,
-        redirect_uri: GOOGLE_REDIRECT_URI,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
         grant_type: "authorization_code",
       }),
     });
 
-    const tokenJson: any = await tokenResponse.json().catch(() => ({}));
-    if (!tokenResponse.ok) {
-      redirectUrl.searchParams.set("google", "error");
-      redirectUrl.searchParams.set(
-        "reason",
-        tokenJson?.error || "token_exchange_failed"
-      );
-      return NextResponse.redirect(redirectUrl);
+    const tokenText = await tokenRes.text();
+    if (!tokenRes.ok) {
+      // go back to wizard with error
+      return NextResponse.redirect(new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=error`, url.origin));
     }
 
-    const tokens: TokenResponse = tokenJson;
+    const token: TokenResponse = JSON.parse(tokenText);
 
-    // calendarId
-    let calendarId = "primary";
-    try {
-      const calendarListResponse = await fetch(
-        "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-        { headers: { Authorization: `Bearer ${tokens.access_token}` } }
-      );
-
-      if (calendarListResponse.ok) {
-        const calendarList = await calendarListResponse.json();
-        const primaryCalendar = calendarList.items?.find(
-          (cal: CalendarListItem) => cal.primary
-        );
-        if (primaryCalendar?.id) calendarId = primaryCalendar.id;
-      }
-    } catch (err) {
-      console.error("Error fetching calendar list:", err);
-    }
-
-    const expiryDate = Date.now() + tokens.expires_in * 1000;
-
-    const oauthData = {
-      calendarId,
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token || null,
-      expiry_date: expiryDate,
-    };
-
-    // success
-    redirectUrl.searchParams.set("google", "ok");
-
-    const response = NextResponse.redirect(redirectUrl);
-
-    response.cookies.set("gcal_oauth", JSON.stringify(oauthData), {
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 365,
-      path: "/",
+    // get calendar list -> choose primary if exists
+    const calRes = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
+      headers: { Authorization: `Bearer ${token.access_token}` },
     });
 
-    return response;
-  } catch (err: any) {
-    const msg = encodeURIComponent(err?.message || "unknown");
-    return NextResponse.redirect(
-      new URL(`/demo?step=5&google=error&reason=${msg}`, BASE_URL)
+    const calText = await calRes.text();
+    if (!calRes.ok) {
+      return NextResponse.redirect(new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=error`, url.origin));
+    }
+
+    const calJson = JSON.parse(calText);
+    const items: any[] = Array.isArray(calJson.items) ? calJson.items : [];
+    const primary = items.find((x) => x && x.primary) || items[0];
+    const calendarId = primary?.id || "primary";
+
+    const payload = {
+      calendarId,
+      access_token: token.access_token,
+      refresh_token: token.refresh_token || null,
+      expiry_date: Date.now() + (token.expires_in * 1000),
+    };
+
+    // ✅ set cookie for /api/google/status to read
+    const res = NextResponse.redirect(
+      new URL(`${returnTo}${returnTo.includes("?") ? "&" : "?"}google=ok`, url.origin)
     );
+
+    res.cookies.set("gcal_oauth", encodeURIComponent(JSON.stringify(payload)), {
+      httpOnly: false, // needs to be readable by /api/google/status if you read client-side; ok for MVP
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30, // 30d
+    });
+
+    return res;
+  } catch (e) {
+    const url = new URL(req.url);
+    // fallback back to wizard
+    return NextResponse.redirect(new URL(`/demo?step=5&google=error`, url.origin));
   }
 }
