@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
       message,
       type,
       uses_booking_software,
-      preferred_contact_method
+      preferred_contact_method,
     } = body;
 
     if (!name || !email || !phone) {
@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 1) Запис в Supabase
     const { data, error } = await supabase
       .from('leads')
       .insert([
@@ -38,7 +39,8 @@ export async function POST(request: NextRequest) {
           message: message || null,
           type: type || 'contact',
           status: 'new',
-          uses_booking_software: uses_booking_software !== undefined ? uses_booking_software : null,
+          uses_booking_software:
+            uses_booking_software !== undefined ? uses_booking_software : null,
           preferred_contact_method: preferred_contact_method || null,
         },
       ])
@@ -53,12 +55,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 2) Forward към Apps Script (не чупим success-а ако Apps Script падне)
+    const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL?.trim();
+
+    if (APPS_SCRIPT_URL) {
+      fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'lead',
+          ...body,
+        }),
+      }).catch((e) => console.error('AppsScript forward failed:', e));
+    } else {
+      console.warn('Missing APPS_SCRIPT_URL, skipping Apps Script forward');
+    }
+
     return NextResponse.json(
-      {
-        success: true,
-        message: 'Заявката е изпратена успешно!',
-        data
-      },
+      { success: true, message: 'Заявката е изпратена успешно!', data },
       { status: 200 }
     );
   } catch (error) {
