@@ -12,12 +12,23 @@ interface ContactFormProps {
   type?: 'contact' | 'demo' | 'pricing';
 }
 
+type FormState = {
+  name: string;
+  email: string;
+  phone: string;
+  salon_name: string;
+  city: string;
+  locations_count: string; // държим като string за input
+  uses_booking_software: '' | 'yes' | 'no';
+  preferred_contact_method: 'phone' | 'email';
+  message: string;
+};
+
 export function ContactForm({ type = 'contact' }: ContactFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState('');
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormState>({
     name: '',
     email: '',
     phone: '',
@@ -29,73 +40,73 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
     message: '',
   });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    setFormData((p) => ({ ...p, [name]: value }));
   };
+
+  function toIntSafe(v: string, fallback = 1) {
+    const n = Number(String(v || '').trim());
+    if (!Number.isFinite(n) || n <= 0) return fallback;
+    return Math.floor(n);
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     setIsSubmitting(true);
     setError('');
 
     try {
+      const payload = {
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        salon_name: formData.salon_name.trim(),
+        city: formData.city.trim(),
+        locations_count: toIntSafe(formData.locations_count, 1),
+        // ако не е избрал нищо -> null (по-чисто за бекенда)
+        uses_booking_software:
+          formData.uses_booking_software === ''
+            ? null
+            : formData.uses_booking_software === 'yes',
+        preferred_contact_method: formData.preferred_contact_method,
+        message: formData.message.trim(),
+        type,
+      };
+
+      // минимална валидация (UI required го прави, но това е backup)
+      if (!payload.name || !payload.email || !payload.phone) {
+        throw new Error('Моля, попълнете име, имейл и телефон.');
+      }
+
       const response = await fetch('/api/lead', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          uses_booking_software: formData.uses_booking_software === 'yes',
-          type,
-        }),
+        body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Нещо се обърка');
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        // ignore
       }
 
-      setIsSuccess(true);
-      setFormData({
-        name: '',
-        email: '',
-        phone: '',
-        salon_name: '',
-        city: '',
-        locations_count: '1',
-        uses_booking_software: '',
-        preferred_contact_method: 'phone',
-        message: '',
-      });
+      if (!response.ok) {
+        throw new Error(data?.error || 'Грешка при изпращане.');
+      }
+
+      // ✅ УСПЕХ -> директно thank you страница
+      window.location.href = '/thanks';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Грешка при изпращане');
-    } finally {
       setIsSubmitting(false);
     }
   };
-
-  if (isSuccess) {
-    return (
-      <Card className="p-8 space-y-6">
-        <h3 className="text-2xl font-semibold">Благодарим ви!</h3>
-        <p>Вашата заявка беше изпратена успешно.</p>
-        <p>Ще се свържем с вас до 24 часа.</p>
-        <p>Проверете имейла си за потвърждение и следващи стъпки.</p>
-
-        <Button
-          onClick={() => setIsSuccess(false)}
-          variant="outline"
-          size="lg"
-          className="border-2 border-gray-600 text-gray-300 hover:bg-white/5 hover:border-gray-400 hover:text-white"
-        >
-          Изпрати друга заявка
-        </Button>
-      </Card>
-    );
-  }
 
   return (
     <Card className="p-8">
@@ -128,7 +139,12 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
 
           <div>
             <Label>Брой обекти</Label>
-            <Input name="locations_count" value={formData.locations_count} onChange={handleChange} />
+            <Input
+              name="locations_count"
+              value={formData.locations_count}
+              onChange={handleChange}
+              inputMode="numeric"
+            />
           </div>
 
           <div>
