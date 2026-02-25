@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
@@ -19,24 +19,29 @@ export function GoogleCalendarStep({
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
 
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const googleParam = urlParams.get('google');
+    // ✅ ако идваш обратно от Google с ?google=ok|error
+    // НЕ махаме step-а, махаме само google param-а
+    const url = new URL(window.location.href);
+    const googleParam = url.searchParams.get('google');
 
-    if (googleParam === 'ok' || googleParam === 'error') {
-      checkGoogleStatus();
-      window.history.replaceState({}, '', window.location.pathname);
-    } else {
-      checkGoogleStatus();
-    }
+    // винаги проверяваме статуса
+    checkGoogleStatus().finally(() => {
+      if (googleParam === 'ok' || googleParam === 'error') {
+        url.searchParams.delete('google');
+        // ✅ запазваме останалите params (пример: step=5)
+        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkGoogleStatus = async () => {
     setIsCheckingStatus(true);
     try {
-      const response = await fetch('/api/google/status');
-      const data = await response.json();
+      const response = await fetch('/api/google/status', { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
 
-      if (data.connected) {
+      if (data?.connected) {
         onGoogleConnectionChange(true, data.calendarId);
       } else {
         onGoogleConnectionChange(false);
@@ -50,7 +55,9 @@ export function GoogleCalendarStep({
   };
 
   const handleConnectGoogle = () => {
-    window.location.href = '/api/google/auth?state=/demo?step=5';
+    // ✅ връщаме се ПАК в step=5 след auth
+    const returnTo = '/demo?step=5&google=ok';
+    window.location.href = `/api/google/auth?state=${encodeURIComponent(returnTo)}`;
   };
 
   const displayCalendarId =
@@ -110,13 +117,25 @@ export function GoogleCalendarStep({
                 Календар: <span className="font-mono">{displayCalendarId}</span>
               </p>
             </div>
+
             <p className="text-sm text-gray-600 text-center">
               Вече можете да продължите към следващата стъпка
             </p>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleConnectGoogle}
+              className="w-full"
+              title="Свържи друг Google акаунт"
+            >
+              Свържи друг Google Calendar
+            </Button>
           </div>
         ) : (
           <div className="space-y-4">
             <Button
+              type="button"
               onClick={handleConnectGoogle}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white py-6 text-lg"
             >
@@ -132,9 +151,8 @@ export function GoogleCalendarStep({
       {!isGoogleConnected && (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
           <p className="text-sm text-gray-700">
-            <strong>Забележка:</strong> CallDesk има нужда от достъп до вашия
-            Google Calendar, за да може AI рецепционистът автоматично да записва
-            часове за ваши клиенти.
+            <strong>Забележка:</strong> CallDesk има нужда от достъп до вашия Google
+            Calendar, за да може AI рецепционистът автоматично да записва часове за ваши клиенти.
           </p>
         </div>
       )}
