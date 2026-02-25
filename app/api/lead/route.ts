@@ -9,33 +9,22 @@ function mustEnv(name: string) {
   return v.trim();
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   const debugId = `lead_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
   try {
-    const body = await request.json();
+    const body = await req.json().catch(() => ({}));
 
-    const {
-      name,
-      email,
-      phone,
-      salon_name,
-      city,
-      locations_count,
-      message,
-      type,
-      uses_booking_software,
-      preferred_contact_method,
-    } = body ?? {};
+    const payload = {
+      action: "lead",
+      debugId,
+      source: "website",
+      createdAt: new Date().toISOString(),
+      ...body,
+    };
 
-    if (!name || !email || !phone) {
-      return NextResponse.json(
-        { ok: false, error: "Моля, попълнете име, имейл и телефон.", debugId },
-        { status: 400 }
-      );
-    }
-
-    const APPS_SCRIPT_URL = mustEnv("APPS_SCRIPT_URL");
+    // ✅ IMPORTANT: винаги пращаме към Apps Script
+    const url = mustEnv("APPS_SCRIPT_URL");
 
     // timeout 15s
     const controller = new AbortController();
@@ -43,74 +32,31 @@ export async function POST(request: NextRequest) {
 
     let res: Response;
     try {
-      res = await fetch(APPS_SCRIPT_URL, {
+      res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
         signal: controller.signal,
-        body: JSON.stringify({
-          action: "lead",
-          name,
-          email,
-          phone,
-          salon_name: salon_name || "",
-          city: city || "",
-          locations_count: locations_count || "1",
-          message: message || "",
-          type: type || "contact",
-          uses_booking_software:
-            typeof uses_booking_software === "boolean"
-              ? uses_booking_software
-              : uses_booking_software === "yes",
-          preferred_contact_method: preferred_contact_method || "phone",
-          debugId,
-          source: "website",
-          createdAt: new Date().toISOString(),
-        }),
       });
     } finally {
       clearTimeout(t);
     }
 
     const text = await res.text();
-    let parsed: any = null;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      // Apps Script понякога връща plain text
-    }
 
-    if (!res.ok || (parsed && parsed.ok === false)) {
-      console.error("Lead forward failed:", {
-        debugId,
-        status: res.status,
-        text,
-      });
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Грешка при записване на заявката (Apps Script).",
-          debugId,
-          status: res.status,
-          appsScript: parsed || text,
-        },
-        { status: 500 }
-      );
-    }
-
-    // OK
-    return NextResponse.json(
-      { ok: true, success: true, message: "OK", debugId, appsScript: parsed || text },
-      { status: 200 }
-    );
-  } catch (e: any) {
-    console.error("API /api/lead error:", debugId, e);
+    // ✅ ВРЪЩАМЕ ТОЧНО КАКВО Е ВЪРНАЛ APPS SCRIPT
     return NextResponse.json(
       {
-        ok: false,
-        error: e?.message || "Възникна грешка при обработката на заявката",
+        ok: res.ok,
+        httpStatus: res.status,
         debugId,
+        appsScriptRaw: text,
       },
+      { status: res.ok ? 200 : 500 }
+    );
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message || "Server error", debugId },
       { status: 500 }
     );
   }
