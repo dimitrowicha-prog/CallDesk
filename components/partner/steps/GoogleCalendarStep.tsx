@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -18,28 +18,17 @@ export function GoogleCalendarStep({
 }: GoogleCalendarStepProps) {
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
 
-  useEffect(() => {
-    // ✅ ако идваш обратно от Google с ?google=ok|error
-    // НЕ махаме step-а, махаме само google param-а
-    const url = new URL(window.location.href);
-    const googleParam = url.searchParams.get('google');
-
-    // винаги проверяваме статуса
-    checkGoogleStatus().finally(() => {
-      if (googleParam === 'ok' || googleParam === 'error') {
-        url.searchParams.delete('google');
-        // ✅ запазваме останалите params (пример: step=5)
-        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const checkGoogleStatus = async () => {
+  const checkGoogleStatus = useCallback(async () => {
     setIsCheckingStatus(true);
     try {
-      const response = await fetch('/api/google/status', { cache: 'no-store' });
-      const data = await response.json().catch(() => ({}));
+      const response = await fetch('/api/google/status', {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'include',
+      });
+
+      // ако API върне HTML/невалидно — да не гръмне wizard-а
+      const data = await response.json().catch(() => ({} as any));
 
       if (data?.connected) {
         onGoogleConnectionChange(true, data.calendarId);
@@ -52,11 +41,26 @@ export function GoogleCalendarStep({
     } finally {
       setIsCheckingStatus(false);
     }
-  };
+  }, [onGoogleConnectionChange]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const googleParam = url.searchParams.get('google');
+
+    // винаги проверяваме статуса
+    checkGoogleStatus().finally(() => {
+      // махаме само google param, НЕ махаме step-а
+      if (googleParam === 'ok' || googleParam === 'error') {
+        url.searchParams.delete('google');
+        const nextUrl = url.pathname + (url.search ? url.search : '');
+        window.history.replaceState({}, '', nextUrl);
+      }
+    });
+  }, [checkGoogleStatus]);
 
   const handleConnectGoogle = () => {
-    // ✅ връщаме се ПАК в step=5 след auth
-    const returnTo = '/demo?step=5&google=ok';
+    // ✅ ВАЖНО: state трябва да е само return path (без google=ok)
+    const returnTo = '/demo?step=5';
     window.location.href = `/api/google/auth?state=${encodeURIComponent(returnTo)}`;
   };
 
@@ -82,7 +86,7 @@ export function GoogleCalendarStep({
             <CheckCircle2 className="h-16 w-16 text-green-600" />
           ) : (
             <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
-              <svg className="w-10 h-10" viewBox="0 0 24 24">
+              <svg className="w-10 h-10" viewBox="0 0 24 24" aria-hidden="true">
                 <path
                   fill="#4285F4"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -127,7 +131,6 @@ export function GoogleCalendarStep({
               variant="outline"
               onClick={handleConnectGoogle}
               className="w-full"
-              title="Свържи друг Google акаунт"
             >
               Свържи друг Google Calendar
             </Button>
