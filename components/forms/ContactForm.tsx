@@ -33,48 +33,80 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    setFormData((p) => ({ ...p, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+    setFormData((p) => ({ ...p, [name]: value }));
   };
+
+  async function postLead(payload: any) {
+    const res = await fetch('/api/lead', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // важно: без keepalive, без магии — чист POST
+      body: JSON.stringify(payload),
+    });
+
+    const raw = await res.text();
+    let data: any = null;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      // може да е plain text
+    }
+
+    return { res, raw, data };
+  }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-
-    // ✅ DEBUG: ако това не излиза, значи submit изобщо не се случва
-    console.log('SUBMIT FIRED ✅');
+    e.stopPropagation();
 
     if (isSubmitting) return;
 
     setIsSubmitting(true);
     setError('');
 
+    const payload = {
+      action: 'lead', // ✅ важно за Apps Script
+      type,
+      source: 'calldeskbg.com',
+
+      name: formData.name.trim(),
+      email: formData.email.trim(),
+      phone: formData.phone.trim(),
+      salon_name: (formData.salon_name || '').trim(),
+      city: (formData.city || '').trim(),
+      locations_count: Number(formData.locations_count || 1),
+
+      uses_booking_software: formData.uses_booking_software === 'yes',
+      preferred_contact_method: formData.preferred_contact_method || 'phone',
+      message: (formData.message || '').trim(),
+    };
+
+    console.log('SUBMIT FIRED ✅', payload);
+
     try {
-      const payload = {
-        ...formData,
-        locations_count: Number(formData.locations_count || 1),
-        uses_booking_software: formData.uses_booking_software === 'yes',
-        type,
-        source: 'calldeskbg.com',
-      };
-
-      console.log('SENDING PAYLOAD ✅', payload);
-
-      const response = await fetch('/api/lead', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json().catch(() => ({}));
-      console.log('API RESPONSE ✅', response.status, data);
-
-      if (!response.ok) {
-        throw new Error(data?.error || 'Нещо се обърка при изпращането');
+      // basic validation (за да не пращаме празно)
+      if (!payload.name || !payload.email || !payload.phone) {
+        throw new Error('Моля попълни име, имейл и телефон.');
       }
 
-      // ✅ директно към thanks (без demo вътрешен success екран)
+      const { res, raw, data } = await postLead(payload);
+
+      console.log('API /api/lead STATUS ✅', res.status);
+      console.log('API /api/lead RAW ✅', raw);
+      console.log('API /api/lead JSON ✅', data);
+
+      if (!res.ok) {
+        const msg = data?.error || data?.message || raw || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+
+      // ✅ success → redirect
       router.push('/thanks');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Грешка при изпращане');
+      const msg = err instanceof Error ? err.message : 'Грешка при изпращане';
+      console.error('SUBMIT ERROR ❌', msg);
+      setError(msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -82,7 +114,8 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
 
   return (
     <Card className="p-8">
-      <form onSubmit={handleSubmit} className="space-y-6">
+      {/* ✅ NO action attr, no native navigation */}
+      <form onSubmit={handleSubmit} className="space-y-6" noValidate>
         <div className="space-y-4">
           <div>
             <Label>Име и фамилия *</Label>
@@ -158,7 +191,6 @@ export function ContactForm({ type = 'contact' }: ContactFormProps) {
           </div>
         )}
 
-        {/* ✅ ВАЖНО: native button за 100% submit */}
         <button
           type="submit"
           disabled={isSubmitting}
