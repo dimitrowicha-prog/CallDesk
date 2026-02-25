@@ -1,5 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function mustGetEnv(name: string) {
   const v = process.env[name];
@@ -7,9 +10,23 @@ function mustGetEnv(name: string) {
   return v.trim();
 }
 
+function safeInt(v: any, fallback = 1) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
 export async function POST(request: NextRequest) {
+  const debugId = `lead_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { ok: false, error: "Invalid JSON body", debugId },
+        { status: 400 }
+      );
+    }
 
     const {
       name,
@@ -26,76 +43,87 @@ export async function POST(request: NextRequest) {
 
     if (!name || !email || !phone) {
       return NextResponse.json(
-        { error: 'Моля, попълнете всички задължителни полета' },
+        { ok: false, error: "Моля, попълнете име, имейл и телефон.", debugId },
         { status: 400 }
       );
     }
 
-    // 1) Supabase insert
+    // ✅ Supabase server client (service role) – bypass RLS
+    const SUPABASE_URL = mustGetEnv("SUPABASE_URL");
+    const SUPABASE_SERVICE_ROLE_KEY = mustGetEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    });
+
+    const payload = {
+      name: String(name).trim(),
+      email: String(email).trim(),
+      phone: String(phone).trim(),
+      salon_name: salon_name ? String(salon_name).trim() : null,
+      city: city ? String(city).trim() : null,
+      locations_count: safeInt(locations_count, 1),
+      message: message ? String(message).trim() : null,
+      type: type ? String(type).trim() : "contact",
+      status: "new",
+      uses_booking_software:
+        typeof uses_booking_software === "boolean"
+          ? uses_booking_software
+          : uses_booking_software === "yes"
+          ? true
+          : uses_booking_software === "no"
+          ? false
+          : null,
+      preferred_contact_method: preferred_contact_method
+        ? String(preferred_contact_method).trim()
+        : null,
+      created_at: new Date().toISOString(),
+    };
+
     const { data, error } = await supabase
-      .from('leads')
-      .insert([
-        {
-          name,
-          email,
-          phone,
-          salon_name: salon_name || null,
-          city: city || null,
-          locations_count: Number(locations_count || 1),
-          message: message || null,
-          type: type || 'contact',
-          status: 'new',
-          uses_booking_software:
-            uses_booking_software !== undefined ? uses_booking_software : null,
-          preferred_contact_method: preferred_contact_method || null,
-        },
-      ])
+      .from("leads")
+      .insert([payload])
       .select()
       .maybeSingle();
 
     if (error) {
-      console.error('Supabase error:', error);
+      console.error("[/api/lead] Supabase error", { debugId, error, payload });
       return NextResponse.json(
-        { error: 'Грешка при записване на заявката' },
+        { ok: false, error: "Грешка при записване на заявката.", debugId },
         { status: 500 }
       );
     }
 
-    // 2) Apps Script forward (await + debug)
-    let appsScript = { attempted: false, ok: false, status: 0, body: '' as string };
-
+    // ✅ Forward към Apps Script (non-blocking, timeout)
     const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL?.trim();
-    if (!APPS_SCRIPT_URL) {
-      console.warn('Missing APPS_SCRIPT_URL, skipping Apps Script forward');
+    if (APPS_SCRIPT_URL) {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 4500);
+
+      fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "lead", ...payload }),
+        signal: controller.signal,
+      })
+        .catch((e) =>
+          console.error("[/api/lead] AppsScript forward failed", { debugId, e })
+        )
+        .finally(() => clearTimeout(t));
     } else {
-      appsScript.attempted = true;
-      try {
-        const r = await fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'lead', ...body }),
-        });
-
-        const text = await r.text();
-        appsScript.status = r.status;
-        appsScript.body = text;
-        appsScript.ok = r.ok;
-
-        if (!r.ok) console.error('AppsScript non-200:', r.status, text);
-        else console.log('AppsScript OK:', r.status, text);
-      } catch (e) {
-        console.error('AppsScript forward failed:', e);
-      }
+      console.warn("[/api/lead] Missing APPS_SCRIPT_URL (skip forward)", {
+        debugId,
+      });
     }
 
     return NextResponse.json(
-      { success: true, message: 'Заявката е изпратена успешно!', data, appsScript },
+      { ok: true, success: true, message: "Заявката е изпратена успешно!", data, debugId },
       { status: 200 }
     );
-  } catch (error) {
-    console.error('API error:', error);
+  } catch (e: any) {
+    console.error("[/api/lead] Unhandled error", { debugId, e });
     return NextResponse.json(
-      { error: 'Възникна грешка при обработката на заявката' },
+      { ok: false, error: "Възникна грешка при обработката.", debugId },
       { status: 500 }
     );
   }
