@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function mustGetEnv(name: string) {
   const v = process.env[name];
@@ -8,49 +10,45 @@ function mustGetEnv(name: string) {
   return v.trim();
 }
 
-// base URL според домейна, от който е дошъл request-а (vercel.app или calldeskbg.com)
-function getBaseUrl(req: NextRequest) {
-  const proto = req.headers.get("x-forwarded-proto") || "https";
-  const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
-  if (!host) throw new Error("Missing host");
-  return `${proto}://${host}`;
-}
-
+// позволяваме САМО относителен path, за да няма open redirect
 function safePath(input: string | null, fallback = "/demo?step=5") {
   const s = (input || "").trim();
   if (!s) return fallback;
   if (!s.startsWith("/")) return fallback;
   if (s.startsWith("//")) return fallback;
+  if (s.includes("://")) return fallback;
   return s;
 }
 
 export async function GET(req: NextRequest) {
-  const BASE_URL = getBaseUrl(req);
-  const clientId = mustGetEnv("GOOGLE_CLIENT_ID");
+  try {
+    const clientId = mustGetEnv("GOOGLE_CLIENT_ID");
+    const redirectUri = mustGetEnv("GOOGLE_REDIRECT_URI"); // https://www.calldeskbg.com/api/google/callback
 
-  const url = new URL(req.url);
-  const state = safePath(url.searchParams.get("state"), "/demo?step=5");
+    const { searchParams } = new URL(req.url);
+    const stateRaw = safePath(searchParams.get("state"), "/demo?step=5");
 
-  const redirectUri = `${BASE_URL}/api/google/callback`;
+    const nonce = crypto.randomBytes(16).toString("hex");
+    const state = Buffer.from(`${stateRaw}||${nonce}`).toString("base64url");
 
-  const googleAuthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  googleAuthUrl.searchParams.set("client_id", clientId);
-  googleAuthUrl.searchParams.set("redirect_uri", redirectUri);
-  googleAuthUrl.searchParams.set("response_type", "code");
-  googleAuthUrl.searchParams.set(
-    "scope",
-    [
-      "openid",
-      "email",
-      "profile",
-      "https://www.googleapis.com/auth/calendar.readonly",
+    const scope = [
+      "https://www.googleapis.com/auth/calendar",
       "https://www.googleapis.com/auth/calendar.events",
-    ].join(" ")
-  );
-  googleAuthUrl.searchParams.set("access_type", "offline");
-  googleAuthUrl.searchParams.set("prompt", "consent");
-  googleAuthUrl.searchParams.set("include_granted_scopes", "true");
-  googleAuthUrl.searchParams.set("state", state);
+    ].join(" ");
 
-  return NextResponse.redirect(googleAuthUrl);
+    const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authUrl.searchParams.set("client_id", clientId);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("access_type", "offline");
+    authUrl.searchParams.set("prompt", "consent");
+    authUrl.searchParams.set("scope", scope);
+    authUrl.searchParams.set("state", state);
+
+    return NextResponse.redirect(authUrl.toString());
+  } catch (e: any) {
+    console.error("GOOGLE AUTH ERROR:", e?.message || e);
+    // ако auth route гръмне, върни към demo със error
+    return NextResponse.redirect("/demo?step=5&google=error");
+  }
 }
