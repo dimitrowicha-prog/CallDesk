@@ -26,10 +26,16 @@ export async function GET(req: NextRequest) {
     const redirectUri = mustGetEnv("GOOGLE_REDIRECT_URI"); // https://www.calldeskbg.com/api/google/callback
 
     const { searchParams } = new URL(req.url);
-    const stateRaw = safePath(searchParams.get("state"), "/demo?step=5");
 
+    // ✅ FIX: не ползваме `state` като input (то е OAuth reserved).
+    // Вземаме returnTo откъм UI-то: /api/google/auth?returnTo=/demo?step=5
+    const returnTo = safePath(searchParams.get("returnTo"), "/demo?step=5");
+
+    // nonce за basic tamper resistance
     const nonce = crypto.randomBytes(16).toString("hex");
-    const state = Buffer.from(`${stateRaw}||${nonce}`).toString("base64url");
+
+    // state формат: base64url("/demo?step=5||<nonce>")
+    const state = Buffer.from(`${returnTo}||${nonce}`).toString("base64url");
 
     const scope = [
       "https://www.googleapis.com/auth/calendar",
